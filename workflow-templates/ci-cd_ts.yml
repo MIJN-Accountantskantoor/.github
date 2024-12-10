@@ -3,27 +3,19 @@ name: CI/CD Typescript
 on:
   workflow_call:
     inputs:
-      branch:
-        required: true
-        type: string
-      host:
-        required: true
-        type: string
-      user:
-        required: true
-        type: string
       deploy_path:
-        required: true
-        type: string
-      ssh_key:
         required: true
         type: string
       node_version:
         required: true
         type: string
+      pm2_app_name:
+        required: true
+        type: string
 
 jobs:
   ci:
+    name: Build and Test
     runs-on: ubuntu-latest
 
     steps:
@@ -44,19 +36,50 @@ jobs:
       - name: Build Project
         run: npm run build
 
+      - name: Archive Build Artifacts
+        run: |
+          if [ -d "./public" ]; then
+            tar -czf deployment.tar.gz ./dist ./public package.json package-lock.json
+          else
+            tar -czf deployment.tar.gz ./dist package.json package-lock.json
+          fi
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-package
+          path: deployment.tar.gz
+
   deploy:
+    name: Deploy to server
     needs: ci
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
-      - name: Deploy to Server
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: deployment-package
+
+      - name: Prepare Deployment Directory
         env:
-          HOST: ${{ inputs.host }}
-          USER: ${{ inputs.user }}
-          KEY: ${{ inputs.ssh_key }}
           DEST: ${{ inputs.deploy_path }}
         run: |
-          echo "${KEY}" > private_key.pem
-          chmod 600 private_key.pem
-          rsync -avz -e "ssh -i private_key.pem" ./dist/ ${USER}@${HOST}:${DEST}
-          rm private_key.pem
+          cd ${DEST}
+          find . -mindepth 1 ! -name '*.log' ! -name '.env' -exec rm -rf {} +
+
+      - name: Deploy and Extract Files
+        run: |
+          mv deployment.tar.gz /path/to/deploy
+          cd /path/to/deploy
+          tar -xzf deployment.tar.gz
+          rm deployment.tar.gz
+
+      - name: Install Dependencies
+        run: |
+          cd /path/to/deploy
+          npm install --production
+
+      - name: Restart PM2 Instance
+        env:
+          PM2_APP: ${{ inputs.pm2_app_name }}
+        run: |
+          pm2 restart my-app || pm2 start dist/server.js --name my-app
