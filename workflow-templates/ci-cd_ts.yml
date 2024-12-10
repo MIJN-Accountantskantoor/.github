@@ -1,0 +1,62 @@
+name: CI/CD Typescript
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        required: true
+        type: string
+      host:
+        required: true
+        type: string
+      user:
+        required: true
+        type: string
+      deploy_path:
+        required: true
+        type: string
+      ssh_key:
+        required: true
+        type: string
+      node_version:
+        required: true
+        type: string
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Lint Code
+        run: npm run lint
+
+      - name: Build Project
+        run: npm run build
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Server
+        env:
+          HOST: ${{ inputs.host }}
+          USER: ${{ inputs.user }}
+          KEY: ${{ inputs.ssh_key }}
+          DEST: ${{ inputs.deploy_path }}
+        run: |
+          echo "${KEY}" > private_key.pem
+          chmod 600 private_key.pem
+          rsync -avz -e "ssh -i private_key.pem" ./dist/ ${USER}@${HOST}:${DEST}
+          rm private_key.pem
